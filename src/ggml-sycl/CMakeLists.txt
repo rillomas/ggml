@@ -46,7 +46,9 @@ else()
     target_link_options(ggml-sycl PRIVATE "-fsycl")
 endif()
 
-target_compile_options(ggml-sycl PRIVATE "-Wno-narrowing")
+target_compile_options(ggml-sycl PRIVATE
+    "-Wno-narrowing"
+    $<$<COMPILE_LANGUAGE:CXX>:-D_ITERATOR_DEBUG_LEVEL=0>)
 
 # Link against oneDNN
 set(GGML_SYCL_DNNL 0)
