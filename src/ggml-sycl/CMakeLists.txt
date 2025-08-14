@@ -36,15 +36,16 @@ if (WIN32)
     endif()
 endif()
 
-find_package(IntelSYCL)
-if (IntelSYCL_FOUND)
-    # Use oneAPI CMake when possible
-    target_link_libraries(ggml-sycl PRIVATE IntelSYCL::SYCL_CXX)
-else()
-    # Fallback to the simplest way of enabling SYCL when using intel/llvm nightly for instance
-    target_compile_options(ggml-sycl PRIVATE "-fsycl")
-    target_link_options(ggml-sycl PRIVATE "-fsycl")
-endif()
+set(TBB_FIND_RELEASE_ONLY TRUE)
+find_package(IntelSYCL REQUIRED)
+
+# get_target_property(SYCL_LIB IntelSYCL::SYCL_CXX IMPORTED_LOCATION_RELEASE)
+# message(STATUS "Sycl Lib:" ${SYCL_LIBRARY})
+target_link_libraries(ggml-sycl PRIVATE ${SYCL_LIBRARY})
+    # In Debug, force link to the RELEASE import library to avoid crashing
+    # $<$<CONFIG:Debug>:$<TARGET_PROPERTY:IntelSYCL::SYCL_CXX,IMPORTED_LOCATION_RELEASE>>
+    # In all other configurations, use the default target
+    # $<$<NOT:$<CONFIG:Debug>>:IntelSYCL::SYCL_CXX>)
 
 target_compile_options(ggml-sycl PRIVATE
     "-Wno-narrowing"
@@ -53,7 +54,7 @@ target_compile_options(ggml-sycl PRIVATE
 # Link against oneDNN
 set(GGML_SYCL_DNNL 0)
 if(GGML_SYCL_DNN)
-    find_package(DNNL)
+    find_package(DNNL REQUIRED)
     if(DNNL_FOUND)
         if (NOT DEFINED DNNL_GPU_VENDOR)
             # default to intel target
@@ -62,10 +63,27 @@ if(GGML_SYCL_DNN)
                 message(WARNING "oneDNN builds bundled with oneapi release only support INTEL target")
             endif()
         endif()
+        if (NOT DNNL_INCLUDE_DIRS)
+            # Manually get include directories from the imported target
+            get_target_property(DNNL_INCLUDE_DIRS DNNL::dnnl INTERFACE_INCLUDE_DIRECTORIES)
+            # If the property is not found, you may need to manually specify the path
+            # if (NOT DNNL_INCLUDE_DIRS)
+            #     set(DNNL_INCLUDE_DIRS ${ONEAPI_ROOT}/dnnl/latest/include)
+            #     message(STATUS "Warning: DNNL::dnnl target has no INTERFACE_INCLUDE_DIRECTORIES property. Falling back to manual path.")
+            # endif()
+            # message(STATUS "DNNL_INCLUDE_DIRS is empty. Manually setting it.")
+            # set(DNNL_INCLUDE_DIRS "${DNNL_ROOT}/include" CACHE PATH "Path to oneDNN include directory")
+        endif()
+        message(STATUS "DNNL include dirs: " ${DNNL_INCLUDE_DIRS})
+        target_include_directories(ggml-sycl PRIVATE ${DNNL_INCLUDE_DIRS})
 
         # Verify oneDNN was compiled for the same target as llama
         if("${GGML_SYCL_TARGET}" STREQUAL "${DNNL_GPU_VENDOR}")
-            target_link_libraries(ggml-sycl PRIVATE DNNL::dnnl)
+            target_link_libraries(ggml-sycl PRIVATE
+                # In Debug, force link to the RELEASE import library to avoid crashing
+                $<$<CONFIG:Debug>:$<TARGET_PROPERTY:DNNL::dnnl,IMPORTED_IMPLIB_RELEASE>>
+                # In all other configurations, use the default target
+                $<$<NOT:$<CONFIG:Debug>>:DNNL::dnnl>)
             set(GGML_SYCL_DNNL 1)
             get_target_property(CONFIGS DNNL::dnnl IMPORTED_CONFIGURATIONS)
             foreach(CONFIG ${CONFIGS})
@@ -117,7 +135,13 @@ if (GGML_SYCL_TARGET STREQUAL "INTEL")
         set(SYCL_COMPILER ON)
     endif()
     find_package(MKL REQUIRED)
+    # message(STATUS "MKL Link lib:" MKL::MKL_SYCL::BLAS)
     target_link_libraries(ggml-sycl PRIVATE MKL::MKL_SYCL::BLAS)
+    # target_link_libraries(ggml-sycl PRIVATE
+    #     # In Debug, force link to the RELEASE import library to avoid crashing
+    #     $<$<CONFIG:Debug>:$<TARGET_PROPERTY:MKL::MKL_SYCL::BLAS,IMPORTED_IMPLIB_RELEASE>>
+    #     # In all other configurations, use the default target
+    #     $<$<NOT:$<CONFIG:Debug>>:MKL::MKL_SYCL::BLAS>)
     target_compile_definitions(ggml-sycl PRIVATE GGML_SYCL_USE_INTEL_ONEMKL)
 else()
     find_package(oneMath QUIET)
